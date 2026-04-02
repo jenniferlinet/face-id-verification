@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Liveness Registration</title>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <style>
+        body { font-family: sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; background-color: #f0f2f5; }
+        #container { background: white; padding: 2rem; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); width: 500px; }
+        h1, p { text-align: center; }
+        .input-group { margin-bottom: 1rem; }
+        label { display: block; margin-bottom: 5px; }
+        input[type="text"] { width: 95%; padding: 10px; border: 1px solid #ccc; border-radius: 4px; }
+        #camera-container { position: relative; width: 100%; height: 375px; background: #000; border-radius: 4px; overflow: hidden; }
+        video { width: 100%; height: 100%; transform: scaleX(-1); } /* Mirror effect */
+        button { width: 100%; padding: 12px; font-size: 1.1em; background-color: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; margin-top: 1rem; }
+        #status { text-align: center; margin-top: 1rem; font-weight: bold; min-height: 24px; font-size: 1.2em; }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <h1>Live Registration</h1>
+        <p>Please follow the on-screen instructions.</p>
+        <div class="input-group">
+            <label for="user_id">User ID:</label>
+            <input type="text" id="user_id" placeholder="e.g., student123">
+        </div>
+        <div id="camera-container">
+            <video id="video" autoplay playsinline></video>
+        </div>
+        <button id="startButton">Start Liveness Check</button>
+        <div id="status" style="color: #333;">Enter your ID and click Start.</div>
+        <canvas id="canvas" style="display:none;"></canvas>
+    </div>
+
+    <script>
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const startButton = document.getElementById('startButton');
+        const statusDiv = document.getElementById('status');
+        const userIdInput = document.getElementById('user_id');
+        let socket;
+        let videoInterval;
+
+        navigator.mediaDevices.getUserMedia({ video: true })
+            .then(stream => { video.srcObject = stream; })
+            .catch(err => {
+                statusDiv.textContent = "Error: Please enable camera access.";
+                statusDiv.style.color = 'red';
+            });
+
+        startButton.addEventListener('click', () => {
+            const userId = userIdInput.value.trim();
+            if (!userId) {
+                statusDiv.textContent = 'User ID cannot be empty.';
+                statusDiv.style.color = 'red';
+                return;
+            }
+            
+            startButton.disabled = true;
+            userIdInput.disabled = true;
+            statusDiv.textContent = 'Connecting to server...';
+            
+            socket = io();
+
+            socket.on('connect', () => {
+                console.log('Connected to server!');
+                videoInterval = setInterval(() => { sendFrame(userId); }, 500);
+            });
+
+            socket.on('server_message', (data) => {
+                statusDiv.textContent = data.message;
+                statusDiv.style.color = '#007bff';
+            });
+
+            socket.on('liveness_success', (data) => {
+                statusDiv.textContent = data.message;
+                statusDiv.style.color = 'green';
+                cleanup();
+                setTimeout(() => { window.location.href = '/verify-page'; }, 3000);
+            });
+            
+            socket.on('registration_failed', (data) => {
+                statusDiv.textContent = data.message;
+                statusDiv.style.color = 'red';
+                cleanup();
+                startButton.disabled = false;
+                userIdInput.disabled = false;
+            });
+        });
+
+        function sendFrame(userId) {
+            if (!socket || !socket.connected) return;
+            const context = canvas.getContext('2d');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            context.translate(canvas.width, 0);
+            context.scale(-1, 1);
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const imageData = canvas.toDataURL('image/jpeg');
+            socket.emit('video_frame', { image_data: imageData, user_id: userId });
+        }
+
+        function cleanup() {
+            clearInterval(videoInterval);
+            if (socket) {
+                socket.disconnect();
+            }
+        }
+    </script>
+</body>
+</html>
